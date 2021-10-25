@@ -1,0 +1,30 @@
+{
+  "name": "@nocom_bot/mod_discord",
+  "version": "0.0.1",
+  "description": "Discord extension for NOCOM_BOT",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nocom-bot/mod_discord.git"
+  },
+  "keywords": [
+    "NOCOM",
+    "bot",
+    "facebook",
+    "chat",
+    "chatbot"
+  ],
+  "author": "BadAimWeeb",
+  "license": "SEE LICENSE IN LICENSE",
+  "bugs": {
+    "url": "https://github.com/nocom-bot/mod_discord/issues"
+  },
+  "homepage": "https://github.com/nocom-bot/mod_discord#readme",
+  "engines": {
+    "node": ">=16"
+  },
+  "engineStrict": true
+}
