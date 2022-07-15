@@ -1,0 +1,6 @@
+{
+    "type": "package",
+    "namespace": "command_handler",
+    "communicationProtocol": "node_ipc",
+    "autoRestart": true
+}
