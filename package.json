@@ -2,7 +2,7 @@
   "name": "@nocom_bot/mod_discord",
   "version": "0.0.1",
   "description": "Discord extension for NOCOM_BOT",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

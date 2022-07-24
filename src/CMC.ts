@@ -1,6 +1,9 @@
 import { EventEmitter } from 'node:events';
 
 export default class CMComm extends EventEmitter {
+    _hsLockResolve = () => {};
+    _hsLock = new Promise<void>(resolve => this._hsLockResolve = resolve);
+
     apiCallbackTable: {
         [nonce: string]: (data: any) => void
     } = {};
@@ -18,9 +21,9 @@ export default class CMComm extends EventEmitter {
             if (msg.protocol_version === "1") {
                 process.send?.({
                     type: "handshake_success",
-                    module: "command_handler",
-                    module_displayname: "Command Handler",
-                    module_namespace: "cmdhandler"
+                    module: "interface",
+                    module_displayname: "Discord",
+                    module_namespace: "int_discord"
                 });
 
                 this._handleEvents();
@@ -34,7 +37,9 @@ export default class CMComm extends EventEmitter {
         });
     }
 
-    callAPI(moduleID: string, cmd: string, data: any) {
+    async callAPI(moduleID: string, cmd: string, data: any) {
+        await this._hsLock;
+
         let nonce = moduleID + "A" + Math.random().toString(10).substring(2);
         let resolve = (value: ({
             exist: true,
@@ -59,28 +64,33 @@ export default class CMComm extends EventEmitter {
     }
 
     _handleEvents() {
+        this._hsLockResolve();
         process.on("message", (msg: {
-            type: string   
+            type: string
         } & (
-            {
-                type: "api_call",
-                call_from: string,
-                call_cmd: string,
-                data: any,
-                nonce: string
-            } | 
-            {
-                type: "api_response",
-                response_from: string,
-                nonce: string
-            } & (
                 {
-                    exist: true,
+                    type: "api_call",
+                    call_from: string,
+                    call_cmd: string,
                     data: any,
-                    error: any
-                } | { exist: false }
-            )
-        )) => {
+                    nonce: string
+                } |
+                {
+                    type: "api_response",
+                    response_from: string,
+                    nonce: string
+                } & (
+                    {
+                        exist: true,
+                        data: any,
+                        error: any
+                    } | { exist: false }
+                ) |
+                {
+                    type: "challenge",
+                    challenge: string
+                }
+            )) => {
             switch (msg.type) {
                 case "api_call":
                     let transmitted = this.emit(`api:${msg.call_cmd}`, msg.call_from, msg.data, (error: any, data: any) => {
@@ -93,7 +103,7 @@ export default class CMComm extends EventEmitter {
                             nonce: msg.nonce
                         })
                     });
-                    
+
                     if (!transmitted) {
                         process.send?.({
                             type: "api_sendresponse",
@@ -112,6 +122,14 @@ export default class CMComm extends EventEmitter {
                         });
                         delete this.apiCallbackTable[msg.response_from + msg.nonce];
                     }
+                    break;
+
+                case "challenge":
+                    process.send?.({
+                        type: "challenge_response",
+                        challenge: msg.challenge
+                    });
+                    break;
             }
         });
     }

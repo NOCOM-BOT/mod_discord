@@ -1,6 +1,6 @@
 {
     "type": "package",
-    "namespace": "command_handler",
+    "namespace": "int_discord",
     "communicationProtocol": "node_ipc",
     "autoRestart": true
 }

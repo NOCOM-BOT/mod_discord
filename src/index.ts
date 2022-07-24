@@ -3,8 +3,8 @@ type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : ne
 import { Client } from 'discord.js';
 import type { GatewayIntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
 
-import CMComm from "./CMC";
-import Logger from "./Logger";
+import CMComm from "./CMC.js";
+import Logger from "./Logger.js";
 
 let cmc = new CMComm();
 let logger = new Logger(cmc);
@@ -34,7 +34,7 @@ cmc.on("api:login", (call_from: string, data: {
             clients[data.interfaceID] = client;
 
             client.on("messageCreate", message => {
-                // Broadcase incoming message event for command handlers
+                // Broadcast incoming message event for command handlers
                 cmc.callAPI("core", "send_event", {
                     eventName: "interface_message",
                     data: {
@@ -63,6 +63,9 @@ cmc.on("api:login", (call_from: string, data: {
                 accountAdditionalData: {}
             });
             logger.info("discord", `Interface ${data.interfaceID} logged in.`);
+        }).catch(error => {
+            callback(String(error), { success: false });
+            logger.error("discord", `Interface ${data.interfaceID} login failed.`, String(error));  
         });
 
     client.on("error", () => {
