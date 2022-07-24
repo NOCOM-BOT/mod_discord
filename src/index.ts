@@ -1,7 +1,7 @@
 type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : never;
 
 import { Client } from 'discord.js';
-import type { IntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
+import type { GatewayIntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
 
 import CMComm from "./CMC";
 import Logger from "./Logger";
@@ -17,7 +17,7 @@ cmc.on("api:login", (call_from: string, data: {
     interfaceID: number;
     loginData: {
         token: string,
-        intents: IntentsString[]
+        intents: GatewayIntentsString[]
     }
 }, callback: (error?: any, data?: any) => void) => {
     if (clients[data.interfaceID]) {
@@ -107,8 +107,8 @@ cmc.on("api:send_message", async (call_from: string, data: {
         return;
     }
 
-    if (!channel.isText() && !channel.isThread()) {
-        callback("Channel is not text or thread", { success: false });
+    if (!channel.isTextBased() && !channel.isThread()) {
+        callback("Channel is not text-based", { success: false });
         return;
     }
 
