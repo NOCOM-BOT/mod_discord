@@ -29,7 +29,7 @@
   "engineStrict": true,
   "type": "module",
   "dependencies": {
-    "discord.js": "^13.8.1"
+    "discord.js": "^14.0.3"
   },
   "devDependencies": {
     "@tsconfig/node18": "^1.0.1",
