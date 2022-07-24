@@ -62,6 +62,7 @@ cmc.on("api:login", (call_from: string, data: {
                 formattedAccountID: `${client.user?.id}@User@Discord`,
                 accountAdditionalData: {}
             });
+            logger.info("discord", `Interface ${data.interfaceID} logged in.`);
         });
 
     client.on("error", () => {
