@@ -48,7 +48,9 @@ cmc.on("api:login", (call_from: string, data: {
                             };
                         }),
                         messageID: message.id,
+                        formattedMessageID: `${message.id}@Message@Discord`,
                         channelID: message.channel.id,
+                        formattedChannelID: `${message.channel.id}@Channel@Discord`,
                         additionalInterfaceData: {}
                     }
                 });
