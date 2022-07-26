@@ -129,15 +129,21 @@ cmc.on("api:send_message", async (call_from: string, data: {
         }
     }
 
-    let sentMsg = await target({
-        ...data.additionalInterfaceData,
-        content: data.content ?? "",
-        // TODO: attachments
-    });
+    try {
+        let sentMsg = await target({
+            ...data.additionalInterfaceData,
+            content: data.content ?? "",
+            // TODO: attachments
+        });
 
-    callback(null, {
-        success: true,
-        messageID: sentMsg.id,
-        additionalInterfaceData: {}
-    });
+        callback(null, {
+            success: true,
+            messageID: sentMsg.id,
+            additionalInterfaceData: {}
+        });
+    } catch (e) {
+        callback(null, {
+            success: false
+        });
+    }
 });
