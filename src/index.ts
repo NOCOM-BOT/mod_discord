@@ -40,6 +40,7 @@ cmc.on("api:login", (call_from: string, data: {
                     data: {
                         interfaceID: data.interfaceID,
                         interfaceHandlerName: "Discord",
+
                         content: message.content,
                         attachments: message.attachments.map(attachment => {
                             return {
@@ -47,10 +48,25 @@ cmc.on("api:login", (call_from: string, data: {
                                 url: attachment.url
                             };
                         }),
+
+                        mentions: Object.fromEntries(message.mentions.users.map(user => {
+                            return [`${user.id}@User@Discord`, {
+                                start: message.content.indexOf(`<@${user.id}>`),
+                                length: `<@${user.id}>`.length
+                            }]
+                        })),
+
                         messageID: message.id,
                         formattedMessageID: `${message.id}@Message@Discord`,
                         channelID: message.channel.id,
                         formattedChannelID: `${message.channel.id}@Channel@Discord`,
+                        guildID: message.guild?.id ?? message.channel.id,
+                        formattedGuildID: message.guild ?
+                            `${message.guild.id}@Guild@Discord` :
+                            `${message.channel.id}@Channel@Discord`,
+                        senderID: message.author.id,
+                        formattedSenderID: `${message.author.id}@User@Discord`,
+
                         additionalInterfaceData: {}
                     }
                 });
@@ -105,8 +121,17 @@ cmc.on("api:send_message", async (call_from: string, data: {
     }
 
     let client = clients[data.interfaceID];
+    let channelID = data.channelID;
+    let messageID = data.replyMessageID;
 
-    let channel = await client.channels.fetch(data.channelID);
+    if (channelID.split("@").length > 1) {
+        channelID = channelID.split("@")[0];
+    }
+    if (typeof messageID === "string" && messageID.split("@").length > 1) {
+        messageID = messageID.split("@")[0];
+    }
+
+    let channel = await client.channels.fetch(channelID);
     if (!channel) {
         callback("Channel does not exist", { success: false });
         return;
@@ -121,8 +146,8 @@ cmc.on("api:send_message", async (call_from: string, data: {
 
     let target: (TypeOfClassMethod<TextChannel, 'send'> | TypeOfClassMethod<Message, 'reply'>) = 
         typedChannel.send.bind(typedChannel);
-    if (data.replyMessageID) {
-        let msg = await typedChannel.messages.fetch(data.replyMessageID);
+    if (typeof messageID === "string") {
+        let msg = await typedChannel.messages.fetch(messageID);
 
         if (msg) {
             target = msg.reply.bind(msg);
