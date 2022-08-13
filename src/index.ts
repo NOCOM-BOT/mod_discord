@@ -2,9 +2,31 @@ type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : ne
 
 import { Client } from 'discord.js';
 import type { GatewayIntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
+import { setTimeout } from 'timers/promises';
 
 import CMComm from "./CMC.js";
 import Logger from "./Logger.js";
+
+interface IMessageData {
+    interfaceID: number;
+    content: string;
+    attachments: {
+        filename: string,
+        url: string
+    }[],
+    channelID: string;
+    replyMessageID?: string,
+    additionalInterfaceData?: MessageOptions | ReplyMessageOptions
+}
+
+type ICommandArgs = [
+    name: string,
+    desc: {
+        fallback: string,
+        [ISOLanguageCode: string]: string
+    },
+    optional: boolean
+][];
 
 let cmc = new CMComm();
 let logger = new Logger(cmc);
@@ -13,13 +35,142 @@ let clients: {
     [id: string]: Client
 } = {};
 
-cmc.on("api:login", (call_from: string, data: {
+let slashCommandReturn: {
+    [id: string]: (rt: IMessageData) => void
+} = {};
+
+let resolveLock: () => void = () => { }, lock = new Promise<void>(resolve => {
+    resolveLock = resolve;
+});
+
+let cmdDB: {
+    [command: string]: {
+        args: ICommandArgs,
+        desc: {
+            fallback: string,
+            [ISOLanguageCode: string]: string
+        }
+    }
+} = {};
+
+function parseArgs(
+    args: {
+        fallback: string,
+        [ISOLanguageCode: string]: string
+    },
+    argsName?: string[]
+): ICommandArgs {
+    // standardized args format (example): 
+    // <required arg1> <required arg2> [optional arg3]
+    // <required arg1> <required arg2> [optional arg3] [optional arg4]
+    // <required arg1> [optional arg2]
+    // <required arg1> [optional arg2] [optional arg3]
+    // [optional arg1]
+    // [optional arg1] [optional arg2]
+    // <required arg1]
+    // and so on...
+    let argsArr: ICommandArgs = [];
+
+    for (let language in args) {
+        let argsString = args[language];
+        let currentArg: string;
+        let currentIndex = 0;
+
+        // Match both <> and []
+        // If [], then it's optional, if <>, then it's required
+        while (currentArg = argsString.match(/<([^>]+)>|\[([^\]]+)\]/)?.[0] ?? "") {
+            argsString = argsString.replace(currentArg, "");
+
+            let optional = currentArg.startsWith("[");
+            let argDesc = currentArg.slice(1, -1);
+
+            if (argsArr[currentIndex]) {
+                argsArr[currentIndex][1][language] = argDesc;
+            } else {
+                argsArr.push([
+                    (argsName ?? [])[currentIndex] ?? `a${currentIndex + 1}`,
+                    {
+                        fallback: "FALLBACK_UNKNOWN",
+                        [language]: argDesc
+                    },
+                    optional
+                ]);
+            }
+        }
+    }
+
+    if (Array.isArray(argsName) && argsArr.length !== argsName.length) {
+        return [["arg", { fallback: "Input" }, false]];
+    }
+
+    return argsArr;
+}
+
+(async () => {
+    // Listen for command register event
+    let eventHandlerID = Math.random().toString(10).substring(2) + Math.random().toString(10).substring(2);
+    cmc.on(`api:${eventHandlerID}`, (call_from: string, data: {
+        calledFrom: string;
+        eventName: "cmdhandler_regevent";
+        eventData: {
+            isRegisterEvent: boolean,
+            namespace: string,
+            command: string,
+            description?: {
+                fallback: string,
+                [ISOLanguageCode: string]: string
+            },
+            args?: {
+                fallback: string,
+                [ISOLanguageCode: string]: string
+            },
+            argsName?: string[],
+            compatibility?: string[]
+        };
+    }, callback: (error?: any, data?: any) => void) => {
+        if (call_from != "core") {
+            callback(null, false);
+            return;
+        }
+
+        if (data.eventName === "cmdhandler_regevent") {
+            if (data.eventData.isRegisterEvent) {
+                if (!((data.eventData.argsName ?? []).indexOf("Discord") + 1)) return;
+
+                cmdDB[data.eventData.command] = {
+                    args: parseArgs(data.eventData.args ?? { fallback: "" }, data.eventData.argsName),
+                    desc: data.eventData.description ?? { fallback: "FALLBACK_UNKNOWN" }
+                }
+            } else {
+                if (cmdDB[data.eventData.command]) {
+                    delete cmdDB[data.eventData.command];
+                }
+            }
+        }
+    });
+    await cmc.callAPI("core", "register_event_hook", {
+        callbackFunction: eventHandlerID,
+        eventName: "cmdhandler_regevent"
+    });
+
+    // Find command resolver
+
+    // Only allow API input after 10s to ensure that every command is loaded.
+    await setTimeout(10000);
+    resolveLock();
+})();
+
+cmc.on("api:login", async (call_from: string, data: {
     interfaceID: number;
     loginData: {
         token: string,
-        intents: GatewayIntentsString[]
+        clientID: string,
+        intents: GatewayIntentsString[],
+        disableSlashCommand?: boolean
     }
 }, callback: (error?: any, data?: any) => void) => {
+    await lock;
+
     if (clients[data.interfaceID]) {
         callback("Interface ID exists", { success: false });
         return;
@@ -83,7 +234,7 @@ cmc.on("api:login", (call_from: string, data: {
             logger.info("discord", `Interface ${data.interfaceID} logged in.`);
         }).catch(error => {
             callback(String(error), { success: false });
-            logger.error("discord", `Interface ${data.interfaceID} login failed.`, String(error));  
+            logger.error("discord", `Interface ${data.interfaceID} login failed.`, String(error));
         });
 
     client.on("error", () => {
@@ -93,9 +244,11 @@ cmc.on("api:login", (call_from: string, data: {
     });
 });
 
-cmc.on("api:logout", (call_from: string, data: {
+cmc.on("api:logout", async (call_from: string, data: {
     interfaceID: number
 }, callback: (error?: any, data?: any) => void) => {
+    await lock;
+
     if (clients[data.interfaceID]) {
         clients[data.interfaceID].destroy();
     }
@@ -104,17 +257,9 @@ cmc.on("api:logout", (call_from: string, data: {
     callback(null, null);
 });
 
-cmc.on("api:send_message", async (call_from: string, data: {
-    interfaceID: number;
-    content: string;
-    attachments: {
-        filename: string,
-        url: string
-    }[],
-    channelID: string;
-    replyMessageID?: string,
-    additionalInterfaceData?: MessageOptions | ReplyMessageOptions
-}, callback: (error?: any, data?: any) => void) => {
+cmc.on("api:send_message", async (call_from: string, data: IMessageData, callback: (error?: any, data?: any) => void) => {
+    await lock;
+
     if (!clients[data.interfaceID]) {
         callback("Interface ID does not exist", { success: false });
         return;
@@ -144,7 +289,7 @@ cmc.on("api:send_message", async (call_from: string, data: {
 
     let typedChannel = channel as TextChannel;
 
-    let target: (TypeOfClassMethod<TextChannel, 'send'> | TypeOfClassMethod<Message, 'reply'>) = 
+    let target: (TypeOfClassMethod<TextChannel, 'send'> | TypeOfClassMethod<Message, 'reply'>) =
         typedChannel.send.bind(typedChannel);
     if (typeof messageID === "string") {
         let msg = await typedChannel.messages.fetch(messageID);
