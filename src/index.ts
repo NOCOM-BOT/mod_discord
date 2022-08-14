@@ -1,6 +1,8 @@
+const DISCORD_SUPPORTED_LANGUAGES = ["da", "de", "en-GB", "en-US", "es-ES", "fr", "hr", "it", "lt", "hu", "nl", "no", "pl", "pt-BR", "ro", "fi", "sv-SE", "vi", "tr", "cs", "el", "bg", "ru", "uk", "hi", "th", "zh-CN", "ja", "zh-TW", "ko"];
 type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : never;
 
-import { Client } from 'discord.js';
+import { REST } from '@discordjs/rest';
+import { Client, Routes, SlashCommandBuilder } from 'discord.js';
 import type { GatewayIntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
 import { setTimeout } from 'timers/promises';
 import EventEmitter from 'events';
@@ -106,6 +108,93 @@ function parseArgs(
     }
 
     return argsArr;
+}
+
+function constructSlashCommand(commandInfo: {
+    command: string,
+    data: {
+        args: ICommandArgs,
+        desc: {
+            fallback: string,
+            [ISOLanguageCode: string]: string
+        }
+    }
+}) {
+    // Build command
+    let command = new SlashCommandBuilder()
+        .setName(commandInfo.command)
+        .setDescription(commandInfo.data.desc.fallback);
+
+    // Description localizations
+    for (let [language, description] of Object.entries(commandInfo.data.desc)) {
+        // Discord supported languages
+        if (DISCORD_SUPPORTED_LANGUAGES.includes(language)) {
+            //@ts-ignore
+            command.setDescriptionLocalization(language, description);
+        }
+    }
+
+    // Arguments
+    for (let [argName, argDesc, optional] of commandInfo.data.args) {
+        command.addStringOption(option => {
+            option
+                .setName(argName)
+                .setDescription(argDesc.fallback)
+                .setRequired(!optional);
+
+            for (let [language, description] of Object.entries(argDesc)) {
+                // Discord supported languages
+                if (DISCORD_SUPPORTED_LANGUAGES.includes(language)) {
+                    //@ts-ignore
+                    option.setDescriptionLocalization(language, description);
+                }
+            }
+
+            return option;
+        });
+    }
+
+    // Accept attachments
+    command.addAttachmentOption(option => option
+        .setName("attachment")
+        .setDescription("Attachment")
+        // Must support every Discord supported language
+        .setDescriptionLocalizations({
+            "en-US": "Attachment",
+            "da": "Vedhæftet fil",
+            "de": "Anhang",
+            "en-GB": "Attachment",
+            "es-ES": "Archivo adjunto",
+            "fr": "Pièce jointe",
+            "hr": "Prilog",
+            "it": "Allegato",
+            "lt": "Priedas",
+            "hu": "Csatolmány",
+            "nl": "Bijlage",
+            "pl": "Załącznik",
+            "pt-BR": "Anexo",
+            "ro": "Atașament",
+            "ru": "Вложение",
+            "tr": "Ek",
+            "zh-CN": "附件",
+            "zh-TW": "附件",
+            "ja": "添付",
+            "ko": "첨부파일",
+            "vi": "Tệp đính kèm",
+            "th": "ไฟล์แนบ",
+            "sv-SE": "Bifogat fil",
+            "bg": "Приложение",
+            "cs": "Příloha",
+            "fi": "Liite",
+            "el": "Συνημμένο",
+            "hi": "संलग्नक",
+            "no": "Vedlegg",
+            "uk": "Додаток"
+        })
+        .setRequired(false)
+    );
+
+    return command;
 }
 
 (async () => {
@@ -237,7 +326,7 @@ cmc.on("api:login", async (call_from: string, data: {
     interfaceID: number;
     loginData: {
         token: string,
-        clientID: string,
+        applicationID: string,
         intents: GatewayIntentsString[],
         disableSlashCommand?: boolean
     }
@@ -249,11 +338,55 @@ cmc.on("api:login", async (call_from: string, data: {
         return;
     }
 
+    let rest = new REST({ version: '10' }).setToken(data.loginData.token);
+
+    async function registerCommandEvent(eventData: {
+        command: string,
+        data: {
+            args: ICommandArgs,
+            desc: {
+                fallback: string,
+                [ISOLanguageCode: string]: string
+            }
+        }
+    }) {
+        try {
+            // Build slash command
+            let slashCmd = constructSlashCommand(eventData);
+
+            // Publish command to Discord
+            await rest.put(
+                Routes.applicationCommands(data.loginData.applicationID),
+                {
+                    body: [
+                        slashCmd.toJSON()
+                    ]
+                }
+            );
+        } catch { }
+    }
+
     if (!data.loginData.disableSlashCommand) {
-        if (data.loginData.clientID) {
-            
+        if (data.loginData.applicationID) {
+            regCmdSignal.on("register", registerCommandEvent);
+
+            try {
+                let cmdBuild = Object.entries(cmdDB).map(([command, data]) => constructSlashCommand({
+                    command,
+                    data
+                }).toJSON());
+
+                await rest.put(
+                    Routes.applicationCommands(data.loginData.applicationID),
+                    {
+                        body: cmdBuild
+                    }
+                );
+            } catch (e) { 
+                throw `Failed to register slash command: ${String(e)}`;
+            }
         } else {
-            logger.warn("discord", `Interface ID ${data.interfaceID} does not have client ID configured, skipping slash command support.`);
+            logger.warn("discord", `Interface ID ${data.interfaceID} does not have application ID configured, skipping slash command support.`);
         }
     }
 
@@ -261,68 +394,68 @@ cmc.on("api:login", async (call_from: string, data: {
         intents: data.loginData.intents
     });
 
-    client
-        .login(data.loginData.token).then(() => {
-            clients[data.interfaceID] = client;
-
-            client.on("messageCreate", message => {
-                // Broadcast incoming message event for command handlers
-                cmc.callAPI("core", "send_event", {
-                    eventName: "interface_message",
-                    data: {
-                        interfaceID: data.interfaceID,
-                        interfaceHandlerName: "Discord",
-
-                        content: message.content,
-                        attachments: message.attachments.map(attachment => {
-                            return {
-                                filename: attachment.name ?? "unknown.png",
-                                url: attachment.url
-                            };
-                        }),
-
-                        mentions: Object.fromEntries(message.mentions.users.map(user => {
-                            return [`${user.id}@User@Discord`, {
-                                start: message.content.indexOf(`<@${user.id}>`),
-                                length: `<@${user.id}>`.length
-                            }]
-                        })),
-
-                        messageID: message.id,
-                        formattedMessageID: `${message.id}@Message@Discord`,
-                        channelID: message.channel.id,
-                        formattedChannelID: `${message.channel.id}@Channel@Discord`,
-                        guildID: message.guild?.id ?? message.channel.id,
-                        formattedGuildID: message.guild ?
-                            `${message.guild.id}@Guild@Discord` :
-                            `${message.channel.id}@Channel@Discord`,
-                        senderID: message.author.id,
-                        formattedSenderID: `${message.author.id}@User@Discord`,
-
-                        additionalInterfaceData: {}
-                    }
-                });
-            });
-
-            callback(null, {
-                success: true,
-                interfaceID: data.interfaceID,
-                accountName: client.user?.tag,
-                rawAccountID: client.user?.id,
-                formattedAccountID: `${client.user?.id}@User@Discord`,
-                accountAdditionalData: {}
-            });
-            logger.info("discord", `Interface ${data.interfaceID} logged in.`);
-        }).catch(error => {
-            callback(String(error), { success: false });
-            logger.error("discord", `Interface ${data.interfaceID} login failed.`, String(error));
-        });
-
     client.on("error", () => {
         client.destroy();
-        callback(null, { success: false });
         delete clients[data.interfaceID];
     });
+
+    try {
+        await client.login(data.loginData.token)
+    } catch (error) {
+        callback(String(error), { success: false });
+        logger.error("discord", `Interface ${data.interfaceID} login failed.`, String(error));
+    }
+
+    clients[data.interfaceID] = client;
+
+    client.on("messageCreate", message => {
+        // Broadcast incoming message event for command handlers
+        cmc.callAPI("core", "send_event", {
+            eventName: "interface_message",
+            data: {
+                interfaceID: data.interfaceID,
+                interfaceHandlerName: "Discord",
+
+                content: message.content,
+                attachments: message.attachments.map(attachment => {
+                    return {
+                        filename: attachment.name ?? "unknown.png",
+                        url: attachment.url
+                    };
+                }),
+
+                mentions: Object.fromEntries(message.mentions.users.map(user => {
+                    return [`${user.id}@User@Discord`, {
+                        start: message.content.indexOf(`<@${user.id}>`),
+                        length: `<@${user.id}>`.length
+                    }]
+                })),
+
+                messageID: message.id,
+                formattedMessageID: `${message.id}@Message@Discord`,
+                channelID: message.channel.id,
+                formattedChannelID: `${message.channel.id}@Channel@Discord`,
+                guildID: message.guild?.id ?? message.channel.id,
+                formattedGuildID: message.guild ?
+                    `${message.guild.id}@Guild@Discord` :
+                    `${message.channel.id}@Channel@Discord`,
+                senderID: message.author.id,
+                formattedSenderID: `${message.author.id}@User@Discord`,
+
+                additionalInterfaceData: {}
+            }
+        });
+    });
+
+    callback(null, {
+        success: true,
+        interfaceID: data.interfaceID,
+        accountName: client.user?.tag,
+        rawAccountID: client.user?.id,
+        formattedAccountID: `${client.user?.id}@User@Discord`,
+        accountAdditionalData: {}
+    });
+    logger.info("discord", `Interface ${data.interfaceID} logged in.`);
 });
 
 cmc.on("api:logout", async (call_from: string, data: {
