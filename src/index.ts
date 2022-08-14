@@ -3,6 +3,7 @@ type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : ne
 import { Client } from 'discord.js';
 import type { GatewayIntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
 import { setTimeout } from 'timers/promises';
+import EventEmitter from 'events';
 
 import CMComm from "./CMC.js";
 import Logger from "./Logger.js";
@@ -30,6 +31,7 @@ type ICommandArgs = [
 
 let cmc = new CMComm();
 let logger = new Logger(cmc);
+let regCmdSignal = new EventEmitter();
 
 let clients: {
     [id: string]: Client
@@ -135,15 +137,27 @@ function parseArgs(
 
         if (data.eventName === "cmdhandler_regevent") {
             if (data.eventData.isRegisterEvent) {
-                if (!((data.eventData.argsName ?? []).indexOf("Discord") + 1)) return;
+                if (
+                    Array.isArray(data.eventData.compatibility) &&
+                    data.eventData.compatibility.length &&
+                    !data.eventData.compatibility.includes("Discord")
+                ) return;
 
                 cmdDB[data.eventData.command] = {
                     args: parseArgs(data.eventData.args ?? { fallback: "" }, data.eventData.argsName),
                     desc: data.eventData.description ?? { fallback: "FALLBACK_UNKNOWN" }
                 }
+
+                regCmdSignal.emit("register", {
+                    command: data.eventData.command,
+                    data: cmdDB[data.eventData.command]
+                });
             } else {
                 if (cmdDB[data.eventData.command]) {
                     delete cmdDB[data.eventData.command];
+                    regCmdSignal.emit("unregister", {
+                        command: data.eventData.command
+                    });
                 }
             }
         }
@@ -153,7 +167,66 @@ function parseArgs(
         eventName: "cmdhandler_regevent"
     });
 
-    // Find command resolver
+    // Find command resolver and get initial command list
+    let moduleListRQ = await cmc.callAPI("core", "get_registered_modules", {});
+    if (moduleListRQ.exist && moduleListRQ.data) {
+        for (let module of moduleListRQ.data) {
+            let typedModule = module as {
+                moduleID: string,
+                type: string,
+                namespace: string,
+                displayname: string,
+                running: boolean
+            };
+
+            if (typedModule.type === "cmd_handler") {
+                if (!typedModule.running) {
+                    let reqTO = await cmc.callAPI("core", "wait_for_module", {
+                        moduleNamespace: typedModule.namespace,
+                        timeout: 10000
+                    });
+
+                    if (!reqTO.exist || (reqTO.exist && !reqTO.data)) {
+                        continue;
+                    }
+                }
+
+                // Request command list
+                let cmdListRQ = await cmc.callAPI(typedModule.namespace, "cmd_list", {});
+                if (cmdListRQ.exist && cmdListRQ.data) {
+                    for (let cmd of cmdListRQ.data) {
+                        let typedCmd = cmd as {
+                            command: string,
+                            description?: {
+                                fallback: string,
+                                [ISOLanguageCode: string]: string
+                            },
+                            args?: {
+                                fallback: string,
+                                [ISOLanguageCode: string]: string
+                            },
+                            argsName?: string[],
+                            compatibility?: string[]
+                        };
+
+                        if (Array.isArray(typedCmd.compatibility) && typedCmd.compatibility.length && !typedCmd.compatibility.includes("Discord")) {
+                            continue;
+                        }
+
+                        cmdDB[typedCmd.command] = {
+                            args: parseArgs(typedCmd.args ?? { fallback: "" }, typedCmd.argsName),
+                            desc: typedCmd.description ?? { fallback: "FALLBACK_UNKNOWN" }
+                        };
+
+                        regCmdSignal.emit("register", {
+                            command: typedCmd.command,
+                            data: cmdDB[typedCmd.command]
+                        });
+                    }
+                }
+            }
+        }
+    }
 
     // Only allow API input after 10s to ensure that every command is loaded.
     await setTimeout(10000);
@@ -174,6 +247,14 @@ cmc.on("api:login", async (call_from: string, data: {
     if (clients[data.interfaceID]) {
         callback("Interface ID exists", { success: false });
         return;
+    }
+
+    if (!data.loginData.disableSlashCommand) {
+        if (data.loginData.clientID) {
+            
+        } else {
+            logger.warn("discord", `Interface ID ${data.interfaceID} does not have client ID configured, skipping slash command support.`);
+        }
     }
 
     let client = new Client({
