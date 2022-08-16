@@ -3,9 +3,14 @@ type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : ne
 
 import { REST } from '@discordjs/rest';
 import { Client, Routes, SlashCommandBuilder } from 'discord.js';
-import type { GatewayIntentsString, Message, TextChannel, MessageOptions, ReplyMessageOptions } from 'discord.js';
+import type { GatewayIntentsString, Message, TextChannel, ChatInputCommandInteraction, MessageOptions, ReplyMessageOptions, AttachmentPayload } from 'discord.js';
 import { setTimeout } from 'timers/promises';
 import EventEmitter from 'events';
+
+import http from 'http';
+import https from 'https';
+import fs from 'fs';
+import { fileURLToPath } from "url";
 
 import CMComm from "./CMC.js";
 import Logger from "./Logger.js";
@@ -40,7 +45,7 @@ let clients: {
 } = {};
 
 let slashCommandReturn: {
-    [id: string]: (rt: IMessageData) => void
+    [id: string]: TypeOfClassMethod<ChatInputCommandInteraction, 'reply'>
 } = {};
 
 let resolveLock: () => void = () => { }, lock = new Promise<void>(resolve => {
@@ -382,7 +387,7 @@ cmc.on("api:login", async (call_from: string, data: {
                         body: cmdBuild
                     }
                 );
-            } catch (e) { 
+            } catch (e) {
                 throw `Failed to register slash command: ${String(e)}`;
             }
         } else {
@@ -407,6 +412,74 @@ cmc.on("api:login", async (call_from: string, data: {
     }
 
     clients[data.interfaceID] = client;
+
+    client.on("interactionCreate", async interaction => {
+        // Only allow chat input.
+        if (!interaction.isChatInputCommand()) return;
+
+        let command = interaction.commandName;
+        // Check if the command exists.
+        if (cmdDB.hasOwnProperty(command)) {
+            // We don't know how long the command will be executed, so we need to acknowledge it first.
+            await interaction.deferReply();
+
+            // Convert interaction back to standard commands
+            let parsedArgs: string[] = [];
+            for (let arg of cmdDB[command].args) {
+                let opt = interaction.options.get(arg[0]);
+                if (opt) {
+                    parsedArgs.push(String(opt.value ?? ""));
+                } else {
+                    parsedArgs.push("");
+                }
+            }
+
+            let stdCmd = `/${command} ${parsedArgs.join(" ")}`;
+
+            // Get attachment
+            let att = interaction.options.get("attachment");
+            let processedAtt = [];
+            if (att && att.attachment) {
+                processedAtt.push({
+                    filename: att.attachment.name ?? "unknown.png",
+                    url: att.attachment.url
+                });
+            }
+
+            // Save reply function to slashCommandReturn for replying later when cmdhandler call API.
+            slashCommandReturn[interaction.id] = interaction.reply.bind(interaction);
+
+            // Broadcast converted message to command handlers
+            cmc.callAPI("core", "send_event", {
+                eventName: "interface_message",
+                data: {
+                    interfaceID: data.interfaceID,
+                    interfaceHandlerName: "Discord",
+
+                    content: stdCmd,
+                    attachments: processedAtt,
+
+                    // Mention parsing is not implemented yet. TODO
+                    mentions: {},
+
+                    messageID: interaction.id,
+                    formattedMessageID: `${interaction.id}@SlashCommand@Discord`,
+                    channelID: interaction.channelId,
+                    formattedChannelID: `${interaction.channelId}@Channel@Discord`,
+                    guildID: interaction.guildId ?? interaction.channelId,
+                    formattedGuildID: interaction.guildId ?
+                        `${interaction.guildId}@Guild@Discord` :
+                        `${interaction.channelId}@Channel@Discord`,
+                    senderID: interaction.user.id,
+                    formattedSenderID: `${interaction.user.id}@User@Discord`,
+
+                    additionalInterfaceData: {
+                        discord_isSlashCommand: true
+                    }
+                }
+            });
+        }
+    });
 
     client.on("messageCreate", message => {
         // Broadcast incoming message event for command handlers
@@ -479,45 +552,98 @@ cmc.on("api:send_message", async (call_from: string, data: IMessageData, callbac
         return;
     }
 
-    let client = clients[data.interfaceID];
-    let channelID = data.channelID;
-    let messageID = data.replyMessageID;
+    let target: (
+        TypeOfClassMethod<TextChannel, 'send'> |
+        TypeOfClassMethod<Message, 'reply'> |
+        TypeOfClassMethod<ChatInputCommandInteraction, 'reply'>
+    );
+    if (data.replyMessageID && slashCommandReturn.hasOwnProperty(data.replyMessageID)) {
+        // Reply to slash command, ignoring channelID
+        target = slashCommandReturn[data.replyMessageID];
+    } else {
+        // Standard message sending
+        let client = clients[data.interfaceID];
+        let channelID = data.channelID;
+        let messageID = data.replyMessageID;
 
-    if (channelID.split("@").length > 1) {
-        channelID = channelID.split("@")[0];
-    }
-    if (typeof messageID === "string" && messageID.split("@").length > 1) {
-        messageID = messageID.split("@")[0];
-    }
+        if (channelID.split("@").length > 1) {
+            channelID = channelID.split("@")[0];
+        }
+        if (typeof messageID === "string" && messageID.split("@").length > 1) {
+            messageID = messageID.split("@")[0];
+        }
 
-    let channel = await client.channels.fetch(channelID);
-    if (!channel) {
-        callback("Channel does not exist", { success: false });
-        return;
-    }
+        let channel = await client.channels.fetch(channelID);
+        if (!channel) {
+            callback("Channel does not exist", { success: false });
+            return;
+        }
 
-    if (!channel.isTextBased() && !channel.isThread()) {
-        callback("Channel is not text-based", { success: false });
-        return;
-    }
+        if (!channel.isTextBased() && !channel.isThread()) {
+            callback("Channel is not text-based", { success: false });
+            return;
+        }
 
-    let typedChannel = channel as TextChannel;
+        let typedChannel = channel as TextChannel;
+        target = typedChannel.send.bind(typedChannel);
 
-    let target: (TypeOfClassMethod<TextChannel, 'send'> | TypeOfClassMethod<Message, 'reply'>) =
-        typedChannel.send.bind(typedChannel);
-    if (typeof messageID === "string") {
-        let msg = await typedChannel.messages.fetch(messageID);
+        if (typeof messageID === "string") {
+            let msg = await typedChannel.messages.fetch(messageID);
 
-        if (msg) {
-            target = msg.reply.bind(msg);
+            if (msg) {
+                target = msg.reply.bind(msg);
+            }
         }
     }
 
     try {
+        //@ts-ignore bruh
         let sentMsg = await target({
             ...data.additionalInterfaceData,
             content: data.content ?? "",
-            // TODO: attachments
+            files: (data.attachments?.map?.(attachment => {
+                if (attachment.url.startsWith("data:")) {
+                    // Check if it's base64-encoded or URL-encoded by checking if 
+                    // it has ";base64" in "data:<mime>;base64,<data>"
+                    if (attachment.url.split(";")[1].startsWith("base64")) {
+                        // Base64
+                        return {
+                            attachment: Buffer.from(attachment.url.split(",")[1], "base64"),
+                            name: attachment.filename
+                        } as AttachmentPayload;
+                    } else {
+                        // URL-encoded (percent-encoded)
+                        return {
+                            attachment: Buffer.from(decodeURIComponent(attachment.url.split(",")[1])),
+                            name: attachment.filename
+                        } as AttachmentPayload;
+                    }
+                } else {
+                    // Parse URL with protocol
+                    let parsedURL = new URL(attachment.url);
+                    switch (parsedURL.protocol) {
+                        case "http:":
+                            let httpReq = http.get(parsedURL.toString());
+                            return {
+                                attachment: httpReq,
+                                name: attachment.filename
+                            } as AttachmentPayload;
+                        case "https:":
+                            let httpsReq = https.get(parsedURL.toString());
+                            return {
+                                attachment: httpsReq,
+                                name: attachment.filename
+                            } as AttachmentPayload;
+                        case "file:":
+                            return {
+                                attachment: fs.createReadStream(fileURLToPath(parsedURL.toString())),
+                                name: attachment.filename
+                            } as AttachmentPayload;
+                        default:
+                            return null;
+                    }
+                }
+            }) ?? []).filter(x => x) as AttachmentPayload[]
         });
 
         callback(null, {
