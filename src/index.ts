@@ -3,7 +3,7 @@ type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : ne
 
 import { REST } from '@discordjs/rest';
 import { Client, Routes, SlashCommandBuilder } from 'discord.js';
-import type { GatewayIntentsString, Message, TextChannel, ChatInputCommandInteraction, MessageOptions, ReplyMessageOptions, AttachmentPayload } from 'discord.js';
+import type { GatewayIntentsString, Message, TextChannel, ChatInputCommandInteraction, MessageOptions, ReplyMessageOptions, AttachmentPayload, DMChannel } from 'discord.js';
 import { setTimeout } from 'timers/promises';
 import EventEmitter from 'events';
 
@@ -656,4 +656,73 @@ cmc.on("api:send_message", async (call_from: string, data: IMessageData, callbac
             success: false
         });
     }
+});
+
+cmc.on("api:get_userinfo", async (call_from: string, data: {
+    interfaceID: number,
+    userID: string
+}, callback: (error?: any, data?: any) => void) => {
+    await lock;
+
+    if (!clients[data.interfaceID]) {
+        callback("Interface ID does not exist", { success: false });
+        return;
+    }
+
+    let client = clients[data.interfaceID];
+    let userID = data.userID;
+
+    if (userID.split("@").length > 1) {
+        userID = userID.split("@")[0];
+    }
+
+    let user = await client.users.fetch(userID);
+
+    if (!user) {
+        callback("User does not exist", {});
+        return;
+    }
+
+    callback(null, {
+        name: user.tag
+    });
+});
+
+cmc.on("api:get_channelinfo", async (call_from: string, data: {
+    interfaceID: number,
+    channelID: string
+}, callback: (error?: any, data?: any) => void) => {
+    await lock;
+
+    if (!clients[data.interfaceID]) {
+        callback("Interface ID does not exist", { success: false });
+        return;
+    }
+
+    let client = clients[data.interfaceID];
+    let channelID = data.channelID;
+
+    if (channelID.split("@").length > 1) {
+        channelID = channelID.split("@")[0];
+    }
+
+    let channel = await client.channels.fetch(channelID);
+
+    if (!channel) {
+        callback("Channel does not exist", {});
+        return;
+    }
+
+    let channelName = "";
+
+    if (channel.isDMBased()) {
+        channelName = (channel as DMChannel).recipient?.tag ?? "";
+    } else {
+        channelName = channel.name;
+    }
+
+    callback(null, {
+        channelName,
+        type: channel.type
+    });
 });
