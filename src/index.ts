@@ -286,7 +286,7 @@ function constructSlashCommand(commandInfo: {
                 }
 
                 // Request command list
-                let cmdListRQ = await cmc.callAPI(typedModule.namespace, "cmd_list", {});
+                let cmdListRQ = await cmc.callAPI(typedModule.moduleID, "cmd_list", {});
                 if (cmdListRQ.exist && cmdListRQ.data) {
                     for (let cmd of cmdListRQ.data) {
                         let typedCmd = cmd as {
