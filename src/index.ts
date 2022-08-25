@@ -45,7 +45,7 @@ let clients: {
 } = {};
 
 let slashCommandReturn: {
-    [id: string]: TypeOfClassMethod<ChatInputCommandInteraction, 'reply'>
+    [id: string]: TypeOfClassMethod<ChatInputCommandInteraction, 'editReply'>
 } = {};
 
 let resolveLock: () => void = () => { }, lock = new Promise<void>(resolve => {
@@ -447,7 +447,7 @@ cmc.on("api:login", async (call_from: string, data: {
             }
 
             // Save reply function to slashCommandReturn for replying later when cmdhandler call API.
-            slashCommandReturn[interaction.id] = interaction.reply.bind(interaction);
+            slashCommandReturn[interaction.id] = interaction.editReply.bind(interaction);
 
             // Broadcast converted message to command handlers
             cmc.callAPI("core", "send_event", {
