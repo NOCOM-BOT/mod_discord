@@ -1,6 +1,6 @@
 {
   "name": "@nocom_bot/mod_discord",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Discord extension for NOCOM_BOT",
   "main": "dist/index.js",
   "scripts": {
@@ -32,7 +32,7 @@
   "type": "module",
   "dependencies": {
     "@discordjs/rest": "^1.0.1",
-    "discord.js": "^14.0.3"
+    "discord.js": "^14.11.0"
   },
   "devDependencies": {
     "@tsconfig/node18": "^1.0.1",

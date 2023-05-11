@@ -3,7 +3,7 @@ type TypeOfClassMethod<T, M extends keyof T> = T[M] extends Function ? T[M] : ne
 
 import { REST } from '@discordjs/rest';
 import { Client, Routes, SlashCommandBuilder } from 'discord.js';
-import type { GatewayIntentsString, Message, TextChannel, ChatInputCommandInteraction, MessageOptions, ReplyMessageOptions, AttachmentPayload, DMChannel } from 'discord.js';
+import type { GatewayIntentsString, Message, TextChannel, ChatInputCommandInteraction, MessageCreateOptions, MessageReplyOptions, InteractionEditReplyOptions, AttachmentPayload, DMChannel } from 'discord.js';
 import { setTimeout } from 'timers/promises';
 import EventEmitter from 'events';
 
@@ -24,7 +24,7 @@ interface IMessageData {
     }[],
     channelID: string;
     replyMessageID?: string,
-    additionalInterfaceData?: MessageOptions | ReplyMessageOptions
+    additionalInterfaceData?: MessageCreateOptions | MessageReplyOptions | InteractionEditReplyOptions
 }
 
 type ICommandArgs = [
@@ -555,7 +555,7 @@ cmc.on("api:send_message", async (call_from: string, data: IMessageData, callbac
     let target: (
         TypeOfClassMethod<TextChannel, 'send'> |
         TypeOfClassMethod<Message, 'reply'> |
-        TypeOfClassMethod<ChatInputCommandInteraction, 'reply'>
+        TypeOfClassMethod<ChatInputCommandInteraction, 'editReply'>
     );
     if (data.replyMessageID && slashCommandReturn.hasOwnProperty(data.replyMessageID)) {
         // Reply to slash command, ignoring channelID
