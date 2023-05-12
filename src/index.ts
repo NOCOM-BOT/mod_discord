@@ -472,6 +472,7 @@ cmc.on("api:login", async (call_from: string, data: {
                         `${interaction.channelId}@Channel@Discord`,
                     senderID: interaction.user.id,
                     formattedSenderID: `${interaction.user.id}@User@Discord`,
+                    isDM: !interaction.guildId,
 
                     additionalInterfaceData: {
                         discord_isSlashCommand: true
@@ -514,6 +515,7 @@ cmc.on("api:login", async (call_from: string, data: {
                     `${message.channel.id}@Channel@Discord`,
                 senderID: message.author.id,
                 formattedSenderID: `${message.author.id}@User@Discord`,
+                isDM: !message.guild,
 
                 additionalInterfaceData: {}
             }
